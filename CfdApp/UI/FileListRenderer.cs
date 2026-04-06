@@ -46,8 +46,10 @@ public class FileListRenderer
         var pageStart = state.DirectoryState.PageStartIndex;
         var entriesPerPage = state.GetTotalEntriesPerPage();
         
-        // カラム幅を計算
-        int columnWidth = Console.WindowWidth / state.ColumnCount;
+        // カラム幅を計算（カラム間のスペース1文字を考慮）
+        int totalSeparators = state.ColumnCount - 1; // カラム間の区切り数
+        int availableWidth = Console.WindowWidth - totalSeparators;
+        int columnWidth = availableWidth / state.ColumnCount;
         int rowsPerColumn = state.GetEntriesPerPage();
         
         for (int row = 0; row < rowsPerColumn; row++)
@@ -69,6 +71,12 @@ public class FileListRenderer
                 {
                     // 空のスペースを埋める
                     Console.Write(new string(' ', columnWidth));
+                }
+                
+                // 最後のカラム以外は区切りスペースを追加
+                if (col < state.ColumnCount - 1)
+                {
+                    Console.Write(" ");
                 }
             }
         }
@@ -123,29 +131,119 @@ public class FileListRenderer
         if (nameWidth < 10)
         {
             // 幅が狭すぎる場合は名前のみ表示
-            return TruncateString(entry.Name, width);
+            return TruncateStringByDisplayWidth(entry.Name, width);
         }
         
-        string name = TruncateString(entry.Name, nameWidth);
+        string name = TruncateStringByDisplayWidth(entry.Name, nameWidth);
         string size = entry.GetFormattedSize().PadLeft(8);
         string date = entry.GetFormattedDate();
         
-        return $"{name} {size} {date}".PadRight(width);
+        string result = $"{name} {size} {date}";
+        return PadToDisplayWidth(result, width);
     }
 
-    private static string TruncateString(string str, int maxLength)
+    /// <summary>
+    /// 文字列の表示幅を計算（全角文字は2、半角文字は1）
+    /// </summary>
+    private static int GetDisplayWidth(string str)
     {
-        if (str.Length <= maxLength)
+        int width = 0;
+        foreach (char c in str)
         {
-            return str.PadRight(maxLength);
+            // 全角文字（日本語、中国語など）は2文字分の幅
+            if (c >= 0x1100 && (
+                (c >= 0x1100 && c <= 0x115F) ||  // Hangul Jamo
+                (c >= 0x2E80 && c <= 0x9FFF) ||  // CJK
+                (c >= 0xAC00 && c <= 0xD7AF) ||  // Hangul Syllables
+                (c >= 0xF900 && c <= 0xFAFF) ||  // CJK Compatibility Ideographs
+                (c >= 0xFE10 && c <= 0xFE19) ||  // Vertical forms
+                (c >= 0xFE30 && c <= 0xFE6F) ||  // CJK Compatibility Forms
+                (c >= 0xFF00 && c <= 0xFF60) ||  // Fullwidth Forms
+                (c >= 0xFFE0 && c <= 0xFFE6)))
+            {
+                width += 2;
+            }
+            else
+            {
+                width += 1;
+            }
+        }
+        return width;
+    }
+
+    /// <summary>
+    /// 表示幅を考慮して文字列を切り詰める
+    /// </summary>
+    private static string TruncateStringByDisplayWidth(string str, int maxWidth)
+    {
+        if (GetDisplayWidth(str) <= maxWidth)
+        {
+            return PadToDisplayWidth(str, maxWidth);
         }
         
-        if (maxLength <= 3)
+        if (maxWidth <= 3)
         {
-            return str.Substring(0, maxLength);
+            // 幅が狭すぎる場合は単純に切り詰める
+            int width = 0;
+            for (int i = 0; i < str.Length; i++)
+            {
+                int charWidth = (str[i] >= 0x1100 && IsWideChar(str[i])) ? 2 : 1;
+                if (width + charWidth > maxWidth)
+                {
+                    return str.Substring(0, i);
+                }
+                width += charWidth;
+            }
+            return str;
         }
         
-        return str.Substring(0, maxLength - 3) + "...";
+        // "..." を追加するスペースを確保
+        int targetWidth = maxWidth - 3;
+        int accumulatedWidth = 0;
+        int cutIndex = 0;
+        
+        for (int i = 0; i < str.Length; i++)
+        {
+            int charWidth = (str[i] >= 0x1100 && IsWideChar(str[i])) ? 2 : 1;
+            if (accumulatedWidth + charWidth > targetWidth)
+            {
+                break;
+            }
+            accumulatedWidth += charWidth;
+            cutIndex = i + 1;
+        }
+        
+        return PadToDisplayWidth(str.Substring(0, cutIndex) + "...", maxWidth);
+    }
+
+    /// <summary>
+    /// 表示幅を考慮して文字列をパディング
+    /// </summary>
+    private static string PadToDisplayWidth(string str, int targetWidth)
+    {
+        int currentWidth = GetDisplayWidth(str);
+        if (currentWidth >= targetWidth)
+        {
+            return str;
+        }
+        
+        // 不足分をスペースで埋める
+        return str + new string(' ', targetWidth - currentWidth);
+    }
+
+    /// <summary>
+    /// 全角文字かどうかを判定
+    /// </summary>
+    private static bool IsWideChar(char c)
+    {
+        return (c >= 0x1100 && c <= 0x115F) ||
+               (c >= 0x2E80 && c <= 0x9FFF) ||
+               (c >= 0xAC00 && c <= 0xD7AF) ||
+               (c >= 0xF900 && c <= 0xFAFF) ||
+               (c >= 0xFE10 && c <= 0xFE19) ||
+               (c >= 0xFE30 && c <= 0xFE6F) ||
+               (c >= 0xFF00 && c <= 0xFF60) ||
+               (c >= 0xFFE0 && c <= 0xFFE6);
     }
 
     private static void RenderFooter(AppState state)
